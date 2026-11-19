@@ -1,0 +1,149 @@
+name: Autograde Lab 12
+
+on:
+  push:
+    branches-ignore:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  autograde:
+    name: "Autograde Lab12 PHP"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ""
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: lab12_db
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -u root"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout student code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup PHP 8.2
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: mysqli
+
+      - name: Create database schema
+        run: |
+          mysql -h 127.0.0.1 -u root lab12_db < ejercicio1/setup.sql
+
+      - name: Execute stored procedures (if file exists)
+        run: |
+          if [ -f ejercicio2/procedimientos.sql ]; then
+            mysql -h 127.0.0.1 -u root lab12_db < ejercicio2/procedimientos.sql && echo "SP creados" || echo "Error en SP (no es fatal)"
+          fi
+
+      - name: Download & verify official autograde
+        id: verify_official
+        run: |
+          OFICIAL_SHA=$(curl -sf https://raw.githubusercontent.com/SarmientoEdu/Lab12-php/main/autograde.php | sha1sum | cut -d' ' -f1) || OFICIAL_SHA=""
+          LOCAL_SHA=$(sha1sum autograde.php | cut -d' ' -f1)
+          echo "oficial_sha=$OFICIAL_SHA" >> $GITHUB_OUTPUT
+          echo "local_sha=$LOCAL_SHA" >> $GITHUB_OUTPUT
+          if [ -n "$OFICIAL_SHA" ] && [ "$OFICIAL_SHA" != "$LOCAL_SHA" ]; then
+            echo "::warning::autograde.php fue modificado respecto al oficial"
+          fi
+
+      - name: Run autograde
+        env:
+          DB_HOST: 127.0.0.1
+          DB_USER: root
+          DB_PASS: ""
+          DB_NAME: lab12_db
+          GITHUB_HEAD_REF: ${{ github.head_ref }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          php autograde.php 2>&1 | tee autograde_output.txt
+          NOTA=$(php -r "echo json_decode(file_get_contents('resultado_autograde.json'),true)['nota_total'] ?? 0;")
+          if ! [[ "$NOTA" =~ ^[0-9]+$ ]]; then
+            NOTA=0
+          fi
+          PLAGIO=$(php -r "echo json_decode(file_get_contents('resultado_autograde.json'),true)['observacion_plagio'] ?? 'N/D';")
+          HOSTNAME_RUN=$(php -r "echo json_decode(file_get_contents('resultado_autograde.json'),true)['hostname'] ?? 'N/D';")
+          TIMESTAMP_RUN=$(php -r "echo json_decode(file_get_contents('resultado_autograde.json'),true)['timestamp'] ?? 'N/D';")
+
+          echo "## 📊 Resultado Autograde Lab 12" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Campo | Valor |" >> $GITHUB_STEP_SUMMARY
+          echo "| --- | --- |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Nota** | $NOTA / 100 |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Observación plagio** | $PLAGIO |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Hostname estudiante** | $HOSTNAME_RUN |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Timestamp ejecución** | $TIMESTAMP_RUN |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Rama** | $GITHUB_HEAD_REF |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Detalle" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat autograde_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          echo "NOTA=$NOTA" >> $GITHUB_ENV
+
+      - name: Create GitHub issue if commits too fast
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUES=$(php -r "
+            \$r = json_decode(file_get_contents('resultado_autograde.json'), true);
+            foreach (\$r['issues'] ?? [] as \$i) {
+              echo \$i['tipo'].'|'.\$i['detalle'].PHP_EOL;
+            }
+          ")
+          if [ -n "$ISSUES" ]; then
+            BRANCH="${{ github.head_ref || github.ref_name }}"
+            while IFS='|' read -r tipo detalle; do
+              gh issue create \
+                --repo "SarmientoEdu/Lab12-php" \
+                --title "[$tipo] Rama: $BRANCH" \
+                --body "**Tipo:** $tipo
+                **Rama:** $BRANCH
+                **Detalle:** $detalle
+                **Timestamp:** $(date -u)
+                *Este issue fue creado automáticamente por el autograde.*" \
+                2>/dev/null || echo "No se pudo crear issue (token sin permisos de escritura en fork, es esperado)"
+            done <<< "$ISSUES"
+          fi
+
+      - name: Upload result artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: resultado_autograde
+          path: resultado_autograde.json
+          retention-days: 30
+
+      - name: Fail if grade below 60
+        run: |
+          NOTA="${NOTA:-0}"
+          if ! [[ "$NOTA" =~ ^[0-9]+$ ]]; then
+            NOTA=0
+          fi
+          echo "Nota final: $NOTA"
+          if [ "$NOTA" -lt 60 ]; then
+            echo "::error::Nota $NOTA < 60. Revisa el Job Summary para el detalle."
+            exit 1
+          fi
+          echo "✅ Nota $NOTA >= 60. Lab aprobado."

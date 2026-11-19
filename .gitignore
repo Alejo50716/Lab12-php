@@ -1,0 +1,15 @@
+# Archivos de configuración local - NO subir credenciales
+config.php
+*.env
+.env
+
+# Resultado del autograde - generado localmente
+resultado_autograde.json
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+
+# PHP temporales
+*.log
+/vendor/
