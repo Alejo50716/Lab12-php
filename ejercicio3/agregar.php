@@ -6,10 +6,12 @@
 require_once '../ejercicio1/config_db.php';
 
 $error = '';
+$nombre = '';
+$nota = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $nombre = trim($_POST['nombre'] ?? '');
-    $nota   = $_POST['nota'] ?? '';
+    $nombre = trim((string)(filter_input(INPUT_POST, 'nombre') ?? ''));
+    $nota = (string)(filter_input(INPUT_POST, 'nota') ?? '');
 
     if ($nombre === '' || strlen($nombre) > 100 || !is_numeric($nota) || (float)$nota < 0 || (float)$nota > 100) {
         $error = 'Escribe un nombre válido y una nota entre 0 y 100.';
@@ -49,11 +51,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <form method="POST" action="agregar.php">
         <label for="nombre">Nombre:</label>
         <input type="text" id="nombre" name="nombre"
-               value="<?= htmlspecialchars($_POST['nombre'] ?? '') ?>" required>
+               value="<?= htmlspecialchars($nombre, ENT_QUOTES, 'UTF-8') ?>" required>
 
         <label for="nota">Nota (0–100):</label>
         <input type="number" id="nota" name="nota" min="0" max="100" step="0.01"
-               value="<?= htmlspecialchars($_POST['nota'] ?? '') ?>" required>
+               value="<?= htmlspecialchars($nota, ENT_QUOTES, 'UTF-8') ?>" required>
 
         <button type="submit">Agregar</button>
     </form>

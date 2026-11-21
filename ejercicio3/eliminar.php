@@ -6,7 +6,7 @@
 require_once '../ejercicio1/config_db.php';
 
 $conn = conectar();
-$id   = (int)($_GET['id'] ?? 0);
+$id   = (int)(filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT) ?: 0);
 
 if ($id <= 0) {
     header('Location: index.php');
@@ -21,7 +21,7 @@ $stmt->close();
 if (!$fila) { $conn->close(); header('Location: index.php'); exit; }
 $nombre_estudiante = $fila['nombre'];
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirmar'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && filter_has_var(INPUT_POST, 'confirmar')) {
     $stmt = $conn->prepare('DELETE FROM estudiantes WHERE id = ?');
     $stmt->bind_param('i', $id);
     $stmt->execute();
